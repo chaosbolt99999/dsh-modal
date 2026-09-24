@@ -150,9 +150,15 @@ Two mtime details that are load-bearing:
 ```sh
 pnpm install
 pnpm typecheck     # host + client
-pnpm test          # 96 network-free tests
+pnpm test          # 107 network-free tests
 pnpm build
+
+# End-to-end against real Modal: routes a real `cargo test` at a throwaway
+# crate through the built plugin, then removes the crate. Needs credentials.
+MODAL_TOKEN_ID=… MODAL_TOKEN_SECRET=… node spike/dist-e2e.mjs
 ```
+
+`spike/dist-e2e.mjs` drives the built proxy directly, which is how a change to `dist/` gets verified without restarting the harness — the running process holds the previously loaded module in memory.
 
 The classifier in `src/classify.ts` is the safety core and carries the densest tests. Every silent-divergence and OOM-the-host failure mode is a classification bug, and the suite has now caught **seven** real ones — five before the first push, and two more from a single live session:
 

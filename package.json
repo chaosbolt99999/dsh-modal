@@ -1,0 +1,97 @@
+{
+  "name": "dsh-modal",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Route DeepSeek Harness compile/test work to Modal sandboxes with a persistent local-disk cache, while keeping read-only inspection local.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./subprocess": {
+      "types": "./dist/subprocess.d.ts",
+      "default": "./dist/subprocess.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    }
+  },
+  "files": [
+    "dist/**/*",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "bin/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b && node scripts/build-client.mjs",
+    "typecheck": "tsc -b && tsc -p tsconfig.client.json",
+    "test": "vitest run"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "modal",
+    "remote-build",
+    "cargo",
+    "sandbox"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.2",
+    "modal": "0.10.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-bash-local": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-bash-sandbox": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-sandbox": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-settings": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-shell": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-subprocess-local": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-bash-local": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-bash-sandbox": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-sandbox": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-settings": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-shell": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-subprocess-local": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@types/node": "^22.20.1",
+    "@types/react": "^18.3.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.7"
+  }
+}

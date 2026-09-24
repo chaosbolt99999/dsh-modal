@@ -1,0 +1,19 @@
+# dsh-modal bundle layer.
+#
+# Replaces the sandboxing bash executor with the Modal-routing executor. The
+# insert must be a sibling of the row it replaces: `ctx.shell` allows exactly one
+# provider per context, so leaving `bash-sandbox` mounted would fail loud on a
+# duplicate service registration.
+#
+# `subprocess` stays mounted: the routing executor inherits the local process
+# path, and `tool-fs-search`'s glob/grep keep using it directly, so file and
+# line searches stay local.
+#
+# The row carries no config in M0 — the routing policy is still module-scoped
+# (`setRoutingConfig`) and moves onto this row's schemastery `Config` together
+# with the Settings card in M3.
+- id: bash-sandbox
+  disabled: true
+- insert:
+    - id: bash-modal
+      name: 'dsh-modal'

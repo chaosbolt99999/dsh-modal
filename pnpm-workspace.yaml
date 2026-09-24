@@ -1,0 +1,16 @@
+# pnpm 11 asks for an explicit decision on every dependency that ships a build
+# script. Mirrors the harness root's policy: allow only what is needed.
+allowBuilds:
+  # vitest runs on esbuild's platform binary.
+  esbuild: true
+  # LocalSubprocessRuntime imports the PTY backend at module load, so its native
+  # binding must exist even though this plugin only uses ordinary spawn().
+  node-pty: true
+  koffi: true
+  # Restores the executable bit on node-pty's macOS spawn helper.
+  '@deepseek-ai/dsh-subprocess-local': true
+  # Optional native accelerator for cbor-x (a Modal SDK dependency). cbor-x
+  # falls back to a pure-JS codec, so skip the native build.
+  cbor-extract: false
+  # Ships a lifecycle script that is a no-op for our use.
+  protobufjs: false

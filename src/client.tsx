@@ -41,7 +41,7 @@ type Field = {
 const FIELDS: readonly Field[] = [
   { section: 'routing', key: 'mode', label: 'Routing mode', help: 'strict routes and refuses unroutable builds; auto lets them run locally; off disables routing.', kind: 'select', options: ['strict', 'auto', 'off'] },
   { section: 'routing', key: 'onUnroutable', label: 'On unroutable build', help: 'deny fails closed (protects a small host); local falls back to this machine.', kind: 'select', options: ['deny', 'local'] },
-  { section: 'remote', key: 'toolchain', label: 'Toolchain', help: 'Which recipe builds the sandbox image.', kind: 'select', options: ['rust', 'node', 'python', 'generic'] },
+  { section: 'remote', key: 'toolchain', label: 'Toolchain', help: 'Rust is the supported toolchain; generic is a fallback for an unknown name.', kind: 'select', options: ['rust', 'generic'] },
   { section: 'remote', key: 'lanes', label: 'Lanes', help: 'Warm sandboxes per project. Parallel agents use different lanes.', kind: 'number' },
   { section: 'remote', key: 'maxLanesPerProject', label: 'Max lanes', help: 'Hard cap on simultaneous lanes, and so on idle spend.', kind: 'number' },
   { section: 'remote', key: 'cpu', label: 'CPU cores', help: 'Modal bills max(request, actual); sandboxes burst above the request, so a low value keeps idle cheap.', kind: 'number' },

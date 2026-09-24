@@ -218,3 +218,27 @@ describe('heredoc bodies are data, not shell syntax', () => {
     expect(beforeHeredoc('cargo test')).toBe('cargo test')
   })
 })
+
+describe('rust is the only routed toolchain', () => {
+  // Node and Python build trees are small enough that a network round trip buys
+  // little, so they are deliberately NOT on the remote list. Locking this down
+  // stops a later edit from quietly widening what leaves the machine.
+  const local = ['tsc -b', 'tsc --noEmit', 'vitest run', 'npx vitest run', 'pnpm test', 'pytest -q', 'mypy src/', 'python -m pytest']
+  for (const command of local) {
+    it(`${command} stays local`, () => expect(route(command)).toBe('local'))
+  }
+
+  it('is the documented default policy', () => {
+    expect([...DEFAULT_ROUTING.remote].sort()).toEqual(['cargo', 'rustc'])
+  })
+
+  it('still routes the Rust programs', () => {
+    expect(route('cargo test')).toBe('remote')
+    expect(route('rustc --edition 2021 x.rs')).toBe('remote')
+  })
+
+  it('a configured list can widen it again', () => {
+    const widened: RoutingConfig = { ...DEFAULT_ROUTING, remote: [...DEFAULT_ROUTING.remote, 'tsc'] }
+    expect(route('tsc -b', widened)).toBe('remote')
+  })
+})

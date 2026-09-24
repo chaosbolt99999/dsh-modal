@@ -12,6 +12,7 @@
 
 import z from '@deepseek-ai/schemastery'
 import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
+import { DEFAULT_ROUTING as CLASSIFIER_DEFAULTS } from './classify.js'
 import type { RemoteSettings, RoutingSettings } from './engine/types.js'
 
 /** The shell executor's own knobs, inherited verbatim so the row stays a drop-in. */
@@ -30,13 +31,20 @@ export interface PluginConfig extends ShellConfig {
   remote?: Partial<RemoteSettings>
 }
 
-/** Routing defaults: Rust-first, refusing unroutable builds. */
+/**
+ * Routing defaults.
+ *
+ * Re-exported from the classifier so the policy that is *enforced* and the
+ * policy that is *defaulted* can never drift apart — they were two copies of
+ * one list before, which is exactly how a program ends up routed in one place
+ * and ignored in another.
+ */
 export const DEFAULT_ROUTING: RoutingSettings = {
-  mode: 'strict',
-  onUnroutable: 'deny',
-  remote: ['cargo', 'rustc', 'tsc', 'vitest', 'pytest', 'mypy'],
-  forcedLocal: [],
-  remotePathPrefixes: ['target/'],
+  mode: CLASSIFIER_DEFAULTS.mode,
+  onUnroutable: CLASSIFIER_DEFAULTS.onUnroutable,
+  remote: CLASSIFIER_DEFAULTS.remote,
+  forcedLocal: CLASSIFIER_DEFAULTS.forcedLocal,
+  remotePathPrefixes: CLASSIFIER_DEFAULTS.remotePathPrefixes,
 }
 
 /**

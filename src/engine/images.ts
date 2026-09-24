@@ -70,26 +70,6 @@ const RUST: ToolchainRecipe = {
   buildOutputEnv: 'CARGO_TARGET_DIR',
 }
 
-const NODE: ToolchainRecipe = {
-  name: 'node',
-  imageRef: 'node:22-bookworm',
-  aptPackages: ['build-essential', 'pkg-config', 'libssl-dev', 'python3'],
-  setupCommands: ['corepack enable'],
-  env: { CI: '1', NO_COLOR: '1' },
-  cacheHome: '/cache/node',
-  cacheSubdirs: ['pnpm-store', 'npm'],
-}
-
-const PYTHON: ToolchainRecipe = {
-  name: 'python',
-  imageRef: 'python:3.12-bookworm',
-  aptPackages: ['build-essential', 'pkg-config', 'libssl-dev'],
-  setupCommands: [],
-  env: { PIP_DISABLE_PIP_VERSION_CHECK: '1', PYTHONDONTWRITEBYTECODE: '1' },
-  cacheHome: '/cache/python',
-  cacheSubdirs: ['pip'],
-}
-
 const GENERIC: ToolchainRecipe = {
   name: 'generic',
   imageRef: 'debian:bookworm-slim',
@@ -100,8 +80,19 @@ const GENERIC: ToolchainRecipe = {
   cacheSubdirs: [],
 }
 
-/** Every known recipe, keyed by the name used in config. */
-export const RECIPES: Readonly<Record<string, ToolchainRecipe>> = { rust: RUST, node: NODE, python: PYTHON, generic: GENERIC }
+/**
+ * Every known recipe, keyed by the name used in config.
+ *
+ * Rust only, deliberately: `generic` exists as a safe fallback for an unknown
+ * toolchain name, not as a second supported language. Node and Python were
+ * dropped because their build trees are small enough that remote routing buys
+ * little — the cost this plugin exists to move is a multi-gigabyte cargo
+ * `target/` plus a memory-bound link.
+ *
+ * To add a language: one recipe here, its `cacheHome`/`buildOutputEnv`, and its
+ * program added to `routing.remote`.
+ */
+export const RECIPES: Readonly<Record<string, ToolchainRecipe>> = { rust: RUST, generic: GENERIC }
 
 /**
  * Look up a recipe, falling back to `generic` rather than failing a command.

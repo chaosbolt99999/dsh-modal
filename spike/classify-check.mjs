@@ -17,6 +17,12 @@ const cases = [
   ['wc -l src/classify.ts && grep -c describe tests/classify.spec.ts', 'local'],
   ["cat > notes.md <<'EOF'\nrun cargo test here\nEOF", 'local'],
   ['ls -la crates', 'local'],
+  // Rust only: other toolchains build small trees, so a round trip buys little.
+  ['tsc -b', 'local'],
+  ['tsc --noEmit', 'local'],
+  ['vitest run', 'local'],
+  ['pytest -q', 'local'],
+  ['mypy src/', 'local'],
 ]
 
 let failures = 0

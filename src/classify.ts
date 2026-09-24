@@ -38,10 +38,18 @@ export interface RoutingConfig {
   readonly onUnroutable: 'deny' | 'local'
 }
 
-/** The default policy: Rust-first, with the safe read-only escape hatch. */
+/**
+ * The default policy: **Rust only**.
+ *
+ * Rust is the whole reason this plugin exists — a cargo `target/` tree runs to
+ * tens of gigabytes and linking it is memory-bound, so moving it off a small
+ * host is worth a network round trip. Other toolchains cost a fraction of that,
+ * so routing them buys little and only adds ways to be surprised. Adding one
+ * later is two lines: a recipe in `engine/images.ts`, and its program here.
+ */
 export const DEFAULT_ROUTING: RoutingConfig = {
   mode: 'strict',
-  remote: ['cargo', 'rustc', 'tsc', 'vitest', 'pytest', 'mypy'],
+  remote: ['cargo', 'rustc'],
   forcedLocal: [],
   remotePathPrefixes: ['target/'],
   onUnroutable: 'deny',

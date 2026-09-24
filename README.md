@@ -18,7 +18,7 @@ agent: cargo test -p quantum-kernel
 
 | | |
 |---|---|
-| **Routes** | `cargo build/check/test/clippy/nextest/doc`, `rustc`, `tsc`, `vitest`, `pytest`, `mypy` — and the same commands piped into `head`/`tail`/`grep`, which is how agents actually write them |
+| **Routes** | `cargo build/check/test/clippy/nextest/doc`, `rustc` — and the same commands piped into `head`/`tail`/`grep`, which is how agents actually write them |
 | **Keeps local** | every read-only command: `ls`, `cat`, `sed -n`, `grep`, `rg`, `wc`, `find`, `git log/status/diff`, `jq`, `tree`, `cargo --version` |
 | **Forces local** | anything that *writes* the tree: `cargo fmt` (write form), `cargo fix`, `cargo clippy --fix`, `cargo add/new/init`, `insta review` |
 | **Refuses** | a build command it cannot route safely (compound line, redirect, subshell, substitution) — rather than silently compiling on your machine |
@@ -26,6 +26,8 @@ agent: cargo test -p quantum-kernel
 | **Parallelism** | lanes: independent warm sandboxes per project so concurrent agents never collide on cargo's target lock |
 
 Read-only work staying local is structural, not a heuristic: the remote set is a **positive allowlist of build programs**, and local is the default.
+
+**Rust only, deliberately.** A cargo `target/` tree runs to tens of gigabytes and linking it is memory-bound, so moving it off a small host is worth a network round trip. Node and Python build trees are a fraction of that, so routing them buys little and only adds ways to be surprised. Adding a language later is two lines: a recipe in `engine/images.ts`, and its program in `routing.remote`.
 
 ## Install
 
@@ -64,10 +66,10 @@ Row config (in a `cordis.patch.yml`), or live in **Settings → Plugins** via th
         routing:
           mode: strict              # strict | auto | off
           onUnroutable: deny        # deny | local
-          remote: ['cargo', 'rustc', 'tsc', 'vitest', 'pytest', 'mypy']
+          remote: ['cargo', 'rustc']
           remotePathPrefixes: ['target/']
         remote:
-          toolchain: rust           # rust | node | python | generic
+          toolchain: rust           # rust | generic (fallback)
           cpu: 2                    # request low; sandboxes burst
           memoryMiB: 24576
           idleTimeoutMs: 120000
@@ -141,7 +143,7 @@ Two mtime details that are load-bearing:
 - **Cancelling a remote command terminates its sandbox** — `ContainerProcess` exposes no kill primitive. The lane is rebuilt from its checkpoint, so it costs a restore, not work.
 - **Remote commands run with network access and no `ctx.sandbox` confinement.** The local sandbox does not extend to Modal. Your source is uploaded to Modal — keep the workspace private.
 - **The third layer needs `remote.workspaceRoot`** when the harness is not launched from the workspace.
-- **Toolchain recipes are opinionated images.** `rust` mirrors a Linux CI runner's apt needs; adjust `remote.aptPackages` for anything else.
+- **Only Rust is supported.** The `rust` image mirrors a Linux CI runner's apt needs (X11/Wayland/keyboard libraries for gpui, a C toolchain for Loro and sqlite); adjust `remote.aptPackages` for a different dependency set, or add a recipe for another language. An unknown `toolchain` name falls back to a bare `generic` Debian image rather than failing the command.
 
 ## Development
 

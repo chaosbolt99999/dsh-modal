@@ -202,13 +202,49 @@ function programOf(word: string): string {
   return slash === -1 ? word : word.slice(slash + 1)
 }
 
+/**
+ * The part of a command that is shell syntax, excluding heredoc bodies.
+ *
+ * A heredoc body is DATA. Scanning it as syntax produces false positives in
+ * both directions: `cat > notes.md <<'EOF' … cargo test … EOF` looks like a
+ * compound build command, and a body mentioning a build tool is enough to have
+ * the whole call refused.
+ * @param command - the raw shell source.
+ * @returns the text before the first heredoc operator.
+ */
+export function beforeHeredoc(command: string): string {
+  const match = /<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?/.exec(command)
+  return match === null ? command : command.slice(0, match.index)
+}
+
+/** One build-tool invocation found inside a command that could not be reduced. */
+interface BuildInvocation {
+  readonly program: string
+  /** Words following the program, used to tell a probe from a build. */
+  readonly argv: readonly string[]
+}
+
+/**
+ * Whether one build-tool invocation only asks a question.
+ *
+ * A run of switches containing a version or help switch counts, so `cargo
+ * --version --verbose` is a probe rather than a build.
+ * @param argv - the words following the program.
+ */
+function isProbeArgs(argv: readonly string[]): boolean {
+  if (argv.length === 0) return true
+  if (CHEAP_SUBCOMMANDS.has(argv[0] as string)) return true
+  const flags = argv.filter(word => word.startsWith('-'))
+  return flags.length === argv.length && flags.some(flag => CHEAP_FLAGS.has(flag))
+}
+
 interface Structure {
   /** The pipeline stage that carries the real work, when the shape is simple. */
   readonly main: readonly Token[] | undefined
   /** Why the shape could not be reduced, when it could not. */
   readonly reason?: string
-  /** The build program seen anywhere in an unroutable command. */
-  readonly seenProgram?: string
+  /** Build-tool invocations seen anywhere in an unroutable command. */
+  readonly invocations?: readonly BuildInvocation[]
 }
 
 /**
@@ -218,15 +254,35 @@ interface Structure {
  * @returns the main pipeline stage, or a reason it is unroutable.
  */
 function reduce(tokens: readonly Token[], config: RoutingConfig): Structure {
-  const isRemoteProgram = (t: Token | undefined): string | undefined => {
-    if (t === undefined || t.kind !== 'word') return undefined
-    const p = programOf(t.value)
-    return config.remote.includes(p) ? p : undefined
-  }
   // A build tool is worth refusing wherever it appears — a later statement, a
   // pipeline stage, or inside a subshell all count. Looking only at the first
   // token would let `(cd x && cargo test)` masquerade as ordinary shell work.
-  const anyRemote = (all: readonly Token[]): string | undefined => all.map(isRemoteProgram).find(p => p !== undefined)
+  //
+  // Splitting on statement separators AND pipeline bars is what lets each
+  // invocation be judged on its own arguments, so a compound line of pure
+  // capability probes (`cargo --version && rustc --version`) is not mistaken
+  // for a build.
+  const collect = (all: readonly Token[]): BuildInvocation[] => {
+    const parts: Token[][] = [[]]
+    for (const t of all) {
+      if (t.kind === 'op' && (t.value === ';' || t.value === '&&' || t.value === '||' || t.value === '&' || t.value === '|')) {
+        parts.push([])
+        continue
+      }
+      ;(parts[parts.length - 1] as Token[]).push(t)
+    }
+    const out: BuildInvocation[] = []
+    for (const part of parts) {
+      const head = part[0]
+      if (head === undefined || head.kind !== 'word') continue
+      const program = programOf(head.value)
+      if (!config.remote.includes(program)) continue
+      out.push({ program, argv: part.slice(1).filter(t => t.kind === 'word').map(t => t.value) })
+    }
+    return out
+  }
+  const found = collect(tokens)
+  const withFound = found.length > 0 ? { invocations: found } : {}
 
   // Split on every statement separator; more than one statement is compound.
   const segments: Token[][] = [[]]
@@ -236,15 +292,13 @@ function reduce(tokens: readonly Token[], config: RoutingConfig): Structure {
   }
   const live = segments.filter(s => s.length > 0)
   if (live.length > 1) {
-    const seen = anyRemote(live.flat())
-    return { main: undefined, reason: 'compound-command', ...(seen !== undefined ? { seenProgram: seen } : {}) }
+    return { main: undefined, reason: 'compound-command', ...withFound }
   }
   const only = live[0]
   if (only === undefined) return { main: undefined, reason: 'empty-command' }
 
   if (only.some(t => t.kind === 'op' && (t.value === '>' || t.value === '<' || t.value === '>>' || t.value === '(' || t.value === ')'))) {
-    const seen = anyRemote(only)
-    return { main: undefined, reason: 'redirection-or-subshell', ...(seen !== undefined ? { seenProgram: seen } : {}) }
+    return { main: undefined, reason: 'redirection-or-subshell', ...withFound }
   }
 
   // A pipeline is routable only when every stage after the first is a read-only filter.
@@ -258,8 +312,7 @@ function reduce(tokens: readonly Token[], config: RoutingConfig): Structure {
   for (const stage of stages.slice(1)) {
     const head = stage[0]
     if (head === undefined || head.kind !== 'word' || !SAFE_FILTERS.has(programOf(head.value))) {
-      const seen = anyRemote(only)
-      return { main: undefined, reason: 'unsafe-pipeline-stage', ...(seen !== undefined ? { seenProgram: seen } : {}) }
+      return { main: undefined, reason: 'unsafe-pipeline-stage', ...withFound }
     }
   }
   return { main: first }
@@ -285,7 +338,7 @@ export function classify(command: string, config: RoutingConfig = DEFAULT_ROUTIN
 
   if (config.mode === 'off') return { route: 'local', reason: 'routing-off' }
 
-  const { tokens, unsafe } = scan(effective)
+  const { tokens, unsafe } = scan(beforeHeredoc(effective))
   const structure = reduce(tokens, config)
 
   if (forced) {
@@ -302,14 +355,21 @@ export function classify(command: string, config: RoutingConfig = DEFAULT_ROUTIN
 
   if (unsafe || structure.main === undefined) {
     const reason = unsafe ? 'unsafe-shell-syntax' : (structure.reason ?? 'unroutable')
-    // Only a command that actually invokes a build tool is worth refusing; anything
-    // else simply stays local, which is the default and never a surprise.
-    if (structure.seenProgram !== undefined) {
-      return config.onUnroutable === 'deny'
-        ? { route: 'deny', reason, program: structure.seenProgram }
-        : { route: 'local', reason: `${reason}-fell-back`, program: structure.seenProgram }
+    const found = structure.invocations ?? []
+    // Only a command that actually builds is worth refusing. A compound line of
+    // capability probes is ordinary inspection and stays local: denying
+    // `cargo --version && rustc --version` would be pure friction with no
+    // safety value, since neither compiles anything.
+    const real = found.filter(invocation => !isProbeArgs(invocation.argv))
+    if (real.length === 0) {
+      return found.length > 0
+        ? { route: 'local', reason: 'capability-probe-in-compound', program: (found[0] as BuildInvocation).program }
+        : { route: 'local', reason }
     }
-    return { route: 'local', reason }
+    const program = (real[0] as BuildInvocation).program
+    return config.onUnroutable === 'deny'
+      ? { route: 'deny', reason, program }
+      : { route: 'local', reason: `${reason}-fell-back`, program }
   }
 
   const main = structure.main
@@ -334,11 +394,14 @@ export function classify(command: string, config: RoutingConfig = DEFAULT_ROUTIN
     // A probe is not a build. `cargo --version`, `cargo --help`, `cargo` alone
     // and the cheap query subcommands all answer locally.
     const args = main.filter(t => t.kind === 'word').slice(1).map(t => t.value)
-    if (args.length === 0 || args.every(a => CHEAP_FLAGS.has(a))) {
-      return { route: 'local', reason: 'capability-probe', program }
+    if (isProbeArgs(args)) {
+      const subcommand = args[0]
+      return {
+        route: 'local',
+        reason: subcommand !== undefined && CHEAP_SUBCOMMANDS.has(subcommand) ? 'cheap-subcommand' : 'capability-probe',
+        program,
+      }
     }
-    const subcommand = args[0] as string
-    if (CHEAP_SUBCOMMANDS.has(subcommand)) return { route: 'local', reason: 'cheap-subcommand', program }
     return { route: 'remote', reason: 'build-program', program }
   }
 

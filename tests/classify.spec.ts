@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { classify, DEFAULT_ROUTING, scan, type RoutingConfig } from '../src/classify.ts'
+import { beforeHeredoc, classify, DEFAULT_ROUTING, scan, type RoutingConfig } from '../src/classify.ts'
 
 const route = (command: string, config: RoutingConfig = DEFAULT_ROUTING): string => classify(command, config).route
 const reason = (command: string, config: RoutingConfig = DEFAULT_ROUTING): string => classify(command, config).reason
@@ -167,5 +167,54 @@ describe('scan', () => {
   })
   it('normalises an absolute program path', () => {
     expect(classify('/usr/local/bin/cargo test').route).toBe('remote')
+  })
+})
+
+describe('capability probes are never treated as builds', () => {
+  // Real-session bug: `cargo --version && cargo --version --verbose | head -2`
+  // was refused as a compound build command. Checking whether a tool exists is
+  // ordinary inspection and must stay local and cheap.
+  it('keeps a compound line of probes local', () => {
+    expect(route('cargo --version && rustc --version')).toBe('local')
+    expect(reason('cargo --version && rustc --version')).toBe('capability-probe-in-compound')
+  })
+  it('keeps the exact shape that failed in a live session', () => {
+    expect(route('cargo --version && cargo --version --verbose | head -2')).toBe('local')
+  })
+  it('treats a switch run containing a probe flag as a probe', () => {
+    expect(route('cargo --version --verbose')).toBe('local')
+    expect(route('rustc -V -v')).toBe('local')
+  })
+  it('still refuses a compound line containing a real build', () => {
+    expect(route('cargo build && cargo --version')).toBe('deny')
+    expect(route('cargo --version && cargo build')).toBe('deny')
+  })
+  it('still refuses the canonical mixed line', () => {
+    expect(route('cargo test && cargo fmt')).toBe('deny')
+  })
+  it('keeps a compound of non-build inspection local', () => {
+    expect(route('cd crates && ls')).toBe('local')
+    expect(route('wc -l src/classify.ts && grep -c describe tests/classify.spec.ts')).toBe('local')
+  })
+  it('a probe carrying a real argument is not a probe', () => {
+    expect(route('cargo --version test')).toBe('remote')
+  })
+})
+
+describe('heredoc bodies are data, not shell syntax', () => {
+  // Second real-session bug: writing a file whose BODY mentions a build tool was
+  // refused, because the body was scanned as if it were the command itself.
+  it('ignores a heredoc body when classifying', () => {
+    expect(route("cat > notes.md <<'EOF'\nrun cargo test here\nEOF")).toBe('local')
+  })
+  it('ignores a heredoc body that would otherwise look like a hazard', () => {
+    expect(route("cat > notes.md <<'EOF'\nalways cargo fmt before committing\nEOF")).toBe('local')
+  })
+  it('still classifies the command before the heredoc', () => {
+    expect(route("cargo test <<'EOF'\ninput\nEOF")).toBe('remote')
+  })
+  it('exposes the truncation for testing', () => {
+    expect(beforeHeredoc('cat <<EOF\nbody\nEOF')).toBe('cat ')
+    expect(beforeHeredoc('cargo test')).toBe('cargo test')
   })
 })

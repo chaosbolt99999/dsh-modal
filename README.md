@@ -148,11 +148,21 @@ Two mtime details that are load-bearing:
 ```sh
 pnpm install
 pnpm typecheck     # host + client
-pnpm test          # 85 network-free tests
+pnpm test          # 96 network-free tests
 pnpm build
 ```
 
-The classifier in `src/classify.ts` is the safety core and carries the densest tests. Every silent-divergence and OOM-the-host failure mode is a classification bug, and the suite caught five real ones on its first run — including `cargo test && cargo fmt` running the whole line locally because a write hazard masked the build beside it.
+The classifier in `src/classify.ts` is the safety core and carries the densest tests. Every silent-divergence and OOM-the-host failure mode is a classification bug, and the suite has now caught **seven** real ones — five before the first push, and two more from a single live session:
+
+- `cargo test && cargo fmt` ran the whole line **locally**, because a write hazard masked the build beside it.
+- `(cd crates && cargo test)` was classified local, because the build program was only looked for in the first token.
+- `2>&1` was read as a file redirection, refusing the most common real shape (`cargo test … 2>&1 | tail -60`).
+- `cargo --version` was routed to a sandbox round trip.
+- A stale-artifact bug where `tar -x` preserved the local mtime, so cargo judged the sandbox's own artifact newer and **silently skipped the rebuild**.
+- `cargo --version && rustc --version` was **refused** as a compound build command. A compound line of pure capability probes now stays local; a compound line containing a real build is still refused.
+- A command whose **heredoc body** merely mentioned `cargo` was refused, because the body was scanned as shell syntax. Heredoc bodies are now excluded from classification.
+
+`spike/classify-check.mjs` re-checks every one of these against the emitted `dist/`, so a source/build drift cannot hide them again.
 
 ## License
 

@@ -23,6 +23,7 @@
   "files": [
     "dist/**/*",
     "lib/client.js",
+    "lib/client.js.map",
     "cordis.patch.yml",
     "bin/**/*",
     "README.md",
@@ -45,7 +46,6 @@
       "immediately": true,
       "inject": [
         "@deepseek-ai/dsh-client-connection",
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-api-remotes"
       ]

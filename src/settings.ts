@@ -31,6 +31,11 @@ interface SettingsLike {
 
 /**
  * Register the settings section when a settings provider is mounted.
+ *
+ * `ctx.inject` is what waits for the provider: rows mount concurrently, so the
+ * service is frequently absent when this plugin constructs. Reading
+ * `ctx.get('settings')` synchronously and returning early would skip the card
+ * for the rest of the process.
  * @param ctx - the owning context.
  * @param base - the composition entry, used as the base and fallback value.
  * @param onResolved - called whenever the authoritative config changes.
@@ -41,8 +46,6 @@ export function installSettingsSection(
   base: PluginConfig,
   onResolved: (config: PluginConfig) => void,
 ): boolean {
-  if (ctx.get('settings') === undefined) return false
-
   ctx.inject(['settings'], settingsCtx => {
     const settings = settingsCtx.get('settings') as SettingsLike | undefined
     // A harness generation without `installSection` simply has no Settings card;

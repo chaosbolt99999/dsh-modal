@@ -23,19 +23,29 @@ const SECTION_ORDER = 900
 /** Render the section body for the active policy. */
 export function promptText(routing: RoutingSettings, remote: RemoteSettings): string {
   if (routing.mode === 'off') return ''
-  const programs = routing.remote.join(', ')
+  const codes = routing.remote.map(program => `\`${program}\``).join(' and ')
+  const names = routing.remote.join(' or ')
   return [
     '## Where builds run',
     '',
-    `Compile, test, lint and doctest commands (${programs}) run on a remote Modal sandbox, not on this machine,`,
-    'and are routed automatically — write them exactly as you normally would.',
+    `Only ${codes} commands are routed. They run on a remote Modal sandbox instead of this machine,`,
+    'automatically — write them exactly as you normally would.',
+    '',
+    '**Every other command runs locally and is completely unchanged.** `bash`, `sh`, `make`, `npm`,',
+    '`pnpm`, `node`, `python`, `docker` and everything else execute on this machine and see the real',
+    'filesystem, including `/tmp`. Assuming otherwise will make you avoid work you can do normally, or',
+    'misdiagnose an ordinary local failure as a sandbox problem.',
     '',
     '- The sandbox holds a synchronized copy of this workspace at the same relative layout, with its own',
     '  persistent build cache. Reads, writes, edits, greps and globs stay local and see the real files.',
-    '- Local-machine constraints do not apply to a build: do not assume it will run out of memory, and do not',
-    '  restructure a command to be "lighter" for this machine.',
-    '- Build output (for example `target/`) exists only in the sandbox. Inspecting it is routed there too.',
-    '- Commands that only read the tree (`grep`, `wc`, `find`, `git log`, `cat`, `ls`) stay local and are fast.',
+    '- Only the WORKSPACE is mirrored. A routed build cannot see `/tmp` or any path outside the workspace,',
+    '  so a file a build must read has to live inside the workspace.',
+    '- Local-machine constraints do not apply to a routed build: do not assume it will run out of memory,',
+    '  and do not restructure a command to be "lighter" for this machine.',
+    '- Build output (for example `target/`) exists only in the sandbox, and inspecting it is routed there too.',
+    `- A script INSIDE the workspace that invokes ${names} is routed with it, so \`bash build.sh\` builds in the`,
+    '  sandbox. A build hidden behind `make`, `just` or `npm run` is NOT routed and would compile on this',
+    '  machine — run the build tool directly instead of wrapping it.',
     '- A build command that cannot be routed safely (a compound line, a redirect, a subshell) is refused rather',
     '  than run locally. Split it into single commands.',
     `- Overrides: \`DSH_MODAL=0 <command>\` runs locally on purpose; \`DSH_MODAL=force <command>\` forces an`,

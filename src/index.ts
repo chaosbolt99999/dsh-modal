@@ -30,6 +30,7 @@ import { classify, type Classification } from './classify.js'
 import { installGuard } from './guard.js'
 import { installPrompt } from './prompt.js'
 import { proxyCommand } from './proxy-command.js'
+import { readWorkspaceScript } from './script.js'
 import { installSettingsSection } from './settings.js'
 import { setSubprocessPolicy } from './subprocess.js'
 import type { RemoteSettings, RoutingSettings } from './engine/types.js'
@@ -105,7 +106,7 @@ export default class ModalBashExecutor extends SandboxBashExecutor {
     const policy = active
     if (policy === undefined) return spec
 
-    const verdict = classify(spec.command, policy.routing)
+    const verdict = classify(spec.command, policy.routing, { cwd: spec.workdir, readWorkspaceFile: readWorkspaceScript })
     if (verdict.route === 'deny') throw new UnroutableBuildError(verdict)
     if (verdict.route === 'local') return spec
 

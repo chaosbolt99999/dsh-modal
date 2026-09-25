@@ -77,6 +77,64 @@ const CHEAP_SUBCOMMANDS = new Set(['locate-project', 'pkgid', 'search', 'info'])
 const CHEAP_FLAGS = new Set(['--version', '-V', '-vV', '--help', '-h', '--list'])
 
 /**
+ * Shell interpreters whose first non-flag argument names a script FILE.
+ *
+ * A script's contents are invisible to the shape analysis below, so a build
+ * hidden inside one would otherwise run locally and unnoticed — and the guard
+ * would not catch it either, because the program is `bash`, not `cargo`.
+ */
+const SHELL_INTERPRETERS = new Set(['bash', 'sh', 'dash', 'zsh', 'ksh'])
+
+/**
+ * The filesystem access the classifier needs in order to look inside a shell
+ * script. Supplied by the caller so this module stays pure: it reads no file,
+ * resolves no path, and holds no opinion about what "the workspace" is.
+ */
+export interface ClassifyHooks {
+  /** Working directory a relative script path resolves against. */
+  readonly cwd: string
+  /**
+   * Read a script's text, or return undefined when it must not be followed —
+   * outside the workspace, missing, not a regular file, or implausibly large.
+   * @param scriptPath - the path exactly as written in the command.
+   * @param cwd - the working directory to resolve it against.
+   */
+  readonly readWorkspaceFile: (scriptPath: string, cwd: string) => string | undefined
+}
+
+/** Escape a program name for literal use inside a RegExp. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Whether a script's text invokes a routed build program as a command word.
+ *
+ * Word-boundary anchored in both directions, so `mycargo` and a
+ * `cargo-fmt-wrapper` do not count while `cargo test` and `./cargo` do.
+ * @param text - the script's source.
+ * @param config - the active routing policy.
+ */
+function invokesBuildProgram(text: string, config: RoutingConfig): boolean {
+  return config.remote.some(program => new RegExp(`(^|[^A-Za-z0-9_.-])${escapeRegExp(program)}(?![A-Za-z0-9_.-])`).test(text))
+}
+
+/**
+ * The script path when a command is `<shell> <script> [args...]`.
+ *
+ * `bash -c "…"` runs inline source rather than a file, so it yields undefined —
+ * that shape is already handled as unroutable.
+ * @param main - the reduced pipeline stage.
+ * @param program - its program name.
+ */
+function shellScriptPath(main: readonly Token[], program: string): string | undefined {
+  if (!SHELL_INTERPRETERS.has(program)) return undefined
+  const first = main.filter(t => t.kind === 'word')[1]
+  if (first === undefined) return undefined
+  return first.value.startsWith('-') ? undefined : first.value
+}
+
+/**
  * Write hazards. Every one of these mutates the working tree, so they are
  * forced local regardless of configuration: a remote write would land in the
  * mirror and silently diverge from the local tree.
@@ -330,9 +388,10 @@ function reduce(tokens: readonly Token[], config: RoutingConfig): Structure {
  * Classify one command.
  * @param command - the raw shell source the model asked to run.
  * @param config - the active routing policy.
+ * @param hooks - optional filesystem access, enabling a look inside workspace shell scripts.
  * @returns where it should run, and why.
  */
-export function classify(command: string, config: RoutingConfig = DEFAULT_ROUTING): Classification {
+export function classify(command: string, config: RoutingConfig = DEFAULT_ROUTING, hooks?: ClassifyHooks): Classification {
   const trimmed = command.trim()
   if (trimmed === '') return { route: 'local', reason: 'empty-command' }
 
@@ -411,6 +470,33 @@ export function classify(command: string, config: RoutingConfig = DEFAULT_ROUTIN
       }
     }
     return { route: 'remote', reason: 'build-program', program }
+  }
+
+  // A build hidden inside a shell script is still a build. The shape analysis
+  // cannot see into the file, so without this `bash build.sh` compiles locally
+  // and unnoticed — and the guard cannot catch it either, because the program
+  // is `bash`, not `cargo`.
+  //
+  // Only a script INSIDE the workspace is followed. A routed command runs
+  // against the mirrored workspace, so a script from anywhere else could not be
+  // run remotely even if its contents were a build; following it would turn a
+  // working local command into a remote failure.
+  if (hooks !== undefined) {
+    const scriptPath = shellScriptPath(main, program)
+    if (scriptPath !== undefined) {
+      const script = hooks.readWorkspaceFile(scriptPath, hooks.cwd)
+      if (script !== undefined) {
+        // A script that rewrites the tree must stay local, exactly as the same
+        // command typed directly would: a remote write lands in the mirror and
+        // silently diverges.
+        if (HAZARD_PATTERNS.some(hazard => hazard.re.test(script))) {
+          return { route: 'local', reason: 'script-contains-write-hazard', program }
+        }
+        if (invokesBuildProgram(script, config)) {
+          return { route: 'remote', reason: 'workspace-script-invokes-build', program }
+        }
+      }
+    }
   }
 
   // Namespace rule: `target/` only exists in the mirror, so inspecting it must

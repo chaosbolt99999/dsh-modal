@@ -242,3 +242,62 @@ describe('rust is the only routed toolchain', () => {
     expect(route('tsc -b', widened)).toBe('remote')
   })
 })
+
+describe('a workspace script that builds is routed with it', () => {
+  // Without this, `bash build.sh` compiles locally and unnoticed: the shape
+  // analysis cannot see inside the file, and the guard cannot catch it either
+  // because the program is `bash`, not `cargo`.
+  const files: Record<string, string> = {
+    'build.sh': '#!/usr/bin/env bash\nset -e\ncargo test --workspace\n',
+    'absolute.sh': '#!/bin/sh\n/usr/local/bin/rustc --edition 2021 x.rs\n',
+    'quiet.sh': '#!/bin/sh\necho nothing to build here\nls -la\n',
+    'writes.sh': '#!/bin/sh\ncargo clippy --fix\n',
+    'wrapped.sh': '#!/bin/sh\n./cargo-fmt-wrapper.sh\n',
+  }
+  const hooks = { cwd: '/w', readWorkspaceFile: (path: string) => files[path] }
+
+  it('routes a workspace script that invokes a build', () => {
+    const verdict = classify('bash build.sh', DEFAULT_ROUTING, hooks)
+    expect(verdict.route).toBe('remote')
+    expect(verdict.reason).toBe('workspace-script-invokes-build')
+  })
+
+  it('routes through sh as well as bash', () => {
+    expect(classify('sh build.sh', DEFAULT_ROUTING, hooks).route).toBe('remote')
+  })
+
+  it('recognises an absolute path to a build tool', () => {
+    expect(classify('bash absolute.sh', DEFAULT_ROUTING, hooks).route).toBe('remote')
+  })
+
+  it('keeps a script with no build in it local', () => {
+    expect(classify('bash quiet.sh', DEFAULT_ROUTING, hooks).route).toBe('local')
+  })
+
+  it('keeps a script that WRITES the tree local', () => {
+    const verdict = classify('bash writes.sh', DEFAULT_ROUTING, hooks)
+    expect(verdict.route).toBe('local')
+    expect(verdict.reason).toBe('script-contains-write-hazard')
+  })
+
+  it('does not match a build name inside a longer word', () => {
+    expect(classify('bash wrapped.sh', DEFAULT_ROUTING, hooks).route).toBe('local')
+  })
+
+  it('stays local when the script cannot be read', () => {
+    const unreadable = { cwd: '/w', readWorkspaceFile: () => undefined }
+    expect(classify('bash /tmp/outside.sh', DEFAULT_ROUTING, unreadable).route).toBe('local')
+  })
+
+  it('stays local with no hooks at all', () => {
+    expect(classify('bash build.sh').route).toBe('local')
+  })
+
+  it('ignores inline source, which is not a file', () => {
+    expect(classify('bash -c "cargo test"', DEFAULT_ROUTING, hooks).route).toBe('local')
+  })
+
+  it('leaves a direct build unaffected', () => {
+    expect(classify('cargo test', DEFAULT_ROUTING, hooks).route).toBe('remote')
+  })
+})

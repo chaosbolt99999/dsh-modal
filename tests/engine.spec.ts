@@ -10,6 +10,7 @@ import { planSync, type SourceManifest } from '../src/engine/sync.ts'
 import { shellJoin, translateArgv, translatePath } from '../src/engine/paths.ts'
 import { commandOf } from '../src/guard.ts'
 import { promptText } from '../src/prompt.ts'
+import { readWorkspaceScript } from '../src/script.ts'
 import { projectKey, emptySpend } from '../src/projects.ts'
 
 describe('config resolution', () => {
@@ -167,5 +168,36 @@ describe('project identity', () => {
   })
   it('starts with an empty ledger', () => {
     expect(emptySpend()).toMatchObject({ commands: 0, estimatedUsd: 0 })
+  })
+})
+
+describe('workspace script reading', () => {
+  // The classifier follows a script only when it can be run against the mirror,
+  // which is exactly the set of files contained by the workspace root.
+  const root = process.cwd()
+
+  it('reads a file inside the workspace', () => {
+    expect(readWorkspaceScript('package.json', root)).toContain('dsh-modal')
+  })
+
+  it('refuses an absolute path outside the workspace', () => {
+    expect(readWorkspaceScript('/etc/passwd', root)).toBeUndefined()
+  })
+
+  it('refuses a sibling directory that merely shares the prefix', () => {
+    // Containment, not a string prefix: `/w-other` must not pass for `/w`.
+    expect(readWorkspaceScript(`${root}-other/script.sh`, root)).toBeUndefined()
+  })
+
+  it('refuses a missing file', () => {
+    expect(readWorkspaceScript('definitely-not-here.sh', root)).toBeUndefined()
+  })
+
+  it('refuses a directory', () => {
+    expect(readWorkspaceScript('src', root)).toBeUndefined()
+  })
+
+  it('refuses a path that escapes the workspace', () => {
+    expect(readWorkspaceScript('../outside.sh', root)).toBeUndefined()
   })
 })

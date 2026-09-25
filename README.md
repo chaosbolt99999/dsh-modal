@@ -19,13 +19,14 @@ agent: cargo test -p quantum-kernel
 | | |
 |---|---|
 | **Routes** | `cargo build/check/test/clippy/nextest/doc`, `rustc` — and the same commands piped into `head`/`tail`/`grep`, which is how agents actually write them |
-| **Keeps local** | every read-only command: `ls`, `cat`, `sed -n`, `grep`, `rg`, `wc`, `find`, `git log/status/diff`, `jq`, `tree`, `cargo --version` |
+| **Follows** | a shell script **inside the workspace** that invokes a build tool, so `bash build.sh` builds in the sandbox instead of locally. A script that writes the tree still stays local |
+| **Keeps local** | **everything else, unchanged** — `bash`, `sh`, `make`, `npm`, `pnpm`, `node`, `python`, `docker`, and every read-only command: `ls`, `cat`, `grep`, `rg`, `wc`, `find`, `git log/status/diff`, `jq`, `cargo --version`. They see the real filesystem, including `/tmp` |
 | **Forces local** | anything that *writes* the tree: `cargo fmt` (write form), `cargo fix`, `cargo clippy --fix`, `cargo add/new/init`, `insta review` |
 | **Refuses** | a build command it cannot route safely (compound line, redirect, subshell, substitution) — rather than silently compiling on your machine |
 | **Caches** | warm sandbox → directory-snapshot `Image` → toolchain download Volume → baked toolchain image |
 | **Parallelism** | lanes: independent warm sandboxes per project so concurrent agents never collide on cargo's target lock |
 
-Read-only work staying local is structural, not a heuristic: the remote set is a **positive allowlist of build programs**, and local is the default.
+Read-only work staying local is structural, not a heuristic: the remote set is a **positive allowlist of build programs**, and local is the default. Exactly two programs route; nothing else changes.
 
 **Rust only, deliberately.** A cargo `target/` tree runs to tens of gigabytes and linking it is memory-bound, so moving it off a small host is worth a network round trip. Node and Python build trees are a fraction of that, so routing them buys little and only adds ways to be surprised. Adding a language later is two lines: a recipe in `engine/images.ts`, and its program in `routing.remote`.
 
@@ -144,13 +145,16 @@ Two mtime details that are load-bearing:
 - **Remote commands run with network access and no `ctx.sandbox` confinement.** The local sandbox does not extend to Modal. Your source is uploaded to Modal — keep the workspace private.
 - **The third layer needs `remote.workspaceRoot`** when the harness is not launched from the workspace.
 - **Only Rust is supported.** The `rust` image mirrors a Linux CI runner's apt needs (X11/Wayland/keyboard libraries for gpui, a C toolchain for Loro and sqlite); adjust `remote.aptPackages` for a different dependency set, or add a recipe for another language. An unknown `toolchain` name falls back to a bare `generic` Debian image rather than failing the command.
+- **A build behind `make`, `just`, `npm run` or an executable script is NOT routed.** The router follows `bash`/`sh`/`dash`/`zsh`/`ksh <script>` when the script lives inside the workspace, but it does not read a `Makefile`, a `justfile` or a `package.json` script, and it does not inspect an executable's shebang. Those compile on the local machine. The prompt tells agents to run the build tool directly; if a genuine wrapper is unavoidable, keep it in the workspace and invoke it as `bash <script>`.
+- **Script following is one level deep.** A workspace script that calls another script containing the build is not followed transitively, so it stays local.
+- **Only the workspace is mirrored.** A routed build cannot see `/tmp` or any path outside the workspace root, so anything a build must read has to live inside it.
 
 ## Development
 
 ```sh
 pnpm install
 pnpm typecheck     # host + client
-pnpm test          # 107 network-free tests
+pnpm test          # 123 network-free tests
 pnpm build
 
 # End-to-end against real Modal: routes a real `cargo test` at a throwaway
@@ -160,7 +164,7 @@ MODAL_TOKEN_ID=… MODAL_TOKEN_SECRET=… node spike/dist-e2e.mjs
 
 `spike/dist-e2e.mjs` drives the built proxy directly, which is how a change to `dist/` gets verified without restarting the harness — the running process holds the previously loaded module in memory.
 
-The classifier in `src/classify.ts` is the safety core and carries the densest tests. Every silent-divergence and OOM-the-host failure mode is a classification bug, and the suite has now caught **seven** real ones — five before the first push, and two more from a single live session:
+The classifier in `src/classify.ts` is the safety core and carries the densest tests. Every silent-divergence and OOM-the-host failure mode is a classification bug, and the suite has now caught **eight** real gaps — five before the first push, two from a live session, and one from an agent's own misreading of the prompt:
 
 - `cargo test && cargo fmt` ran the whole line **locally**, because a write hazard masked the build beside it.
 - `(cd crates && cargo test)` was classified local, because the build program was only looked for in the first token.
@@ -169,6 +173,7 @@ The classifier in `src/classify.ts` is the safety core and carries the densest t
 - A stale-artifact bug where `tar -x` preserved the local mtime, so cargo judged the sandbox's own artifact newer and **silently skipped the rebuild**.
 - `cargo --version && rustc --version` was **refused** as a compound build command. A compound line of pure capability probes now stays local; a compound line containing a real build is still refused.
 - A command whose **heredoc body** merely mentioned `cargo` was refused, because the body was scanned as shell syntax. Heredoc bodies are now excluded from classification.
+- **`bash build.sh` compiled locally, entirely outside the router.** An agent wrapping its build in a helper script bypassed routing *and* the guard, because the program is `bash`, not `cargo`. A script inside the workspace that invokes a build tool is now followed and routed with it. The same investigation showed the prompt never stated that everything *except* `cargo`/`rustc` runs locally and unchanged — an agent had concluded bash itself was remote — which is why that sentence is now explicit.
 
 `spike/classify-check.mjs` re-checks every one of these against the emitted `dist/`, so a source/build drift cannot hide them again.
 
